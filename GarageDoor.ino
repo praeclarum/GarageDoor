@@ -14,8 +14,6 @@
 // Config
 // -----------------------------------------------------------------------------
 
-#define NUM_DOORS           1
-
 #define SERIAL_BAUDRATE     115200
 
 #ifdef RGB_BUILTIN
@@ -25,22 +23,7 @@ const uint8_t ledPin = 2;  // Set your pin here if your board has not defined RG
 #warning "Do not forget to set the RGB LED pin"
 #endif
 
-#define PIN_DOOR1           1
-#define PIN_DOOR2           2
-#define PIN_DOOR3           3
-#define PIN_DOOR4           4
-#define PIN_DOOR5           5
-
-#define ID_DOOR1            "Door 1"
-#define ID_DOOR2            "Door 2"
-#define ID_DOOR3            "Door 3"
-#define ID_DOOR4            "Door 4"
-#define ID_DOOR5            "Door 5"
-
-
-// -----------------------------------------------------------------------------
-// Door
-// -----------------------------------------------------------------------------
+#define PIN_DOOR_BUTTON     1
 
 const uint8_t LIFT_SECONDS = 12;
 
@@ -48,6 +31,11 @@ const uint8_t LIFT_SECONDS = 12;
 // Lift limits in centimeters (physical position)
 const uint16_t MAX_LIFT = 200;  // Maximum lift position (fully open)
 const uint16_t MIN_LIFT = 0;    // Minimum lift position (fully closed)
+
+
+// -----------------------------------------------------------------------------
+// Door Button
+// -----------------------------------------------------------------------------
 
 enum DoorButtonState {
     DBS_Released = 0,
@@ -103,46 +91,19 @@ public:
     }
 };
 
-DoorButton door1(PIN_DOOR1);
-DoorButton door2(PIN_DOOR2);
-DoorButton door3(PIN_DOOR3);
-DoorButton door4(PIN_DOOR4);
-DoorButton door5(PIN_DOOR5);
 
-DoorButton *doorButtons[5] = {
-  &door1,
-  &door2,
-  &door3,
-  &door4,
-  &door5,
-};
-
-void visualizeDoor(uint8_t liftPercent) {
-#ifdef RGB_BUILTIN
-  // Use RGB LED to visualize lift position (brightness)
-  // At LIFT 0% the opening is 100%
-  // At LIFT 100% the opening is 0%
-  float brightness = 1.0f - (float)liftPercent / 100.0f;  // 0.0 to 1.0
-  uint8_t red = (uint8_t)(255 * brightness);
-  uint8_t blue = red;
-  uint8_t green = red;
-  rgbLedWrite(ledPin, red, green, blue);
-#else
-  // For non-RGB boards, just use brightness
-  uint8_t brightnessValue = map(liftPercent, 0, 100, 0, 255);
-  analogWrite(ledPin, brightnessValue);
-#endif
-}
+// -----------------------------------------------------------------------------
+// Door
+// -----------------------------------------------------------------------------
 
 Preferences matterPref;
 const char *liftPercentPrefKey = "LiftPercent";
 
 class Door {
 private:
+  DoorButton button;
   MatterWindowCovering matterEndPoint;
-  // Current window covering state
-  // These will be initialized in setup() based on installed limits and saved percentages
-  uint16_t currentLift = 0;  // Lift position in cm
+  uint16_t currentLift = 0;
   uint8_t currentLiftPercent = 0;
 
 private:
@@ -185,8 +146,34 @@ private:
     return true;
   }
 
+  void visualizeDoor(uint8_t liftPercent) {
+#ifdef RGB_BUILTIN
+    // Use RGB LED to visualize lift position (brightness)
+    // At LIFT 0% the opening is 100%
+    // At LIFT 100% the opening is 0%
+    float brightness = 1.0f - (float)liftPercent / 100.0f;  // 0.0 to 1.0
+    uint8_t red = (uint8_t)(255 * brightness);
+    uint8_t blue = red;
+    uint8_t green = red;
+    rgbLedWrite(ledPin, red, green, blue);
+#else
+    // For non-RGB boards, just use brightness
+    uint8_t brightnessValue = map(liftPercent, 0, 100, 0, 255);
+    analogWrite(ledPin, brightnessValue);
+#endif
+  }
+
+  void visualize() {
+    visualizeDoor(matterEndPoint.getLiftPercentage());
+  }
+
 public:
+  Door(uint8_t buttonPin) : button(buttonPin) {
+  }
+
   void setup() {
+    button.setup();
+
     // Initialize Matter EndPoint
     matterPref.begin("MatterPrefs", false);
 
@@ -230,24 +217,19 @@ public:
       Serial.printf("STOP commanded\r\n");
       return true;
     });
-    matterEndPoint.onChange([](uint8_t liftPercent, uint8_t tiltPercent) {
+    matterEndPoint.onChange([this](uint8_t liftPercent, uint8_t tiltPercent) {
       Serial.printf("Door changed: Lift=%d%%, Tilt=%d%%\r\n", liftPercent, tiltPercent);
-      visualizeDoor(liftPercent);
+      this->visualizeDoor(liftPercent);
       return true;
     });
   }
 
   void update() {
-
+    button.update();
   }
-
-  void visualize() {
-    visualizeDoor(matterEndPoint.getLiftPercentage());
-  }
-
 };
 
-Door door;
+Door door(PIN_DOOR_BUTTON);
 
 
 // -----------------------------------------------------------------------------
