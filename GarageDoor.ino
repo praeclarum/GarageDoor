@@ -49,10 +49,6 @@ const uint8_t LIFT_SECONDS = 12;
 const uint16_t MAX_LIFT = 200;  // Maximum lift position (fully open)
 const uint16_t MIN_LIFT = 0;    // Minimum lift position (fully closed)
 
-// Current window covering state
-// These will be initialized in setup() based on installed limits and saved percentages
-uint16_t currentLift = 0;  // Lift position in cm
-uint8_t currentLiftPercent = 100;
 
 enum DoorButtonState {
     DBS_Released = 0,
@@ -122,13 +118,7 @@ DoorButton *doorButtons[5] = {
   &door5,
 };
 
-void doorSetup() {
-  for (int i = 0; i < NUM_DOORS; i++) {
-    doorButtons[i]->setup();
-  }
-}
-
-void visualizeWindowBlinds(uint8_t liftPercent) {
+void visualizeDoor(uint8_t liftPercent) {
 #ifdef RGB_BUILTIN
   // Use RGB LED to visualize lift position (brightness)
   // At LIFT 0% the opening is 100%
@@ -145,147 +135,171 @@ void visualizeWindowBlinds(uint8_t liftPercent) {
 #endif
 }
 
+Preferences matterPref;
+const char *liftPercentPrefKey = "LiftPercent";
+
+class Door {
+public:
+  MatterWindowCovering matterEndPoint;
+  // Current window covering state
+  // These will be initialized in setup() based on installed limits and saved percentages
+  uint16_t currentLift = 0;  // Lift position in cm
+  uint8_t currentLiftPercent = 0;
+public:
+  void setup() {
+    // Initialize Matter EndPoint
+    matterPref.begin("MatterPrefs", false);
+
+    // default lift percentage is 0% (fully closed) if not stored before
+    uint8_t lastLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+
+    matterEndPoint.begin(lastLiftPercent, 0, MatterWindowCovering::ROLLERSHADE_EXTERIOR);
+
+    // Configure installed limits for lift
+    matterEndPoint.setInstalledOpenLimitLift(MIN_LIFT);
+    matterEndPoint.setInstalledClosedLimitLift(MAX_LIFT);
+
+    // Initialize current positions based on percentages and installed limits
+    uint16_t openLimitLift = matterEndPoint.getInstalledOpenLimitLift();
+    uint16_t closedLimitLift = matterEndPoint.getInstalledClosedLimitLift();
+    currentLiftPercent = lastLiftPercent;
+    if (openLimitLift < closedLimitLift) {
+      currentLift = openLimitLift + ((closedLimitLift - openLimitLift) * lastLiftPercent) / 100;
+    } else {
+      currentLift = openLimitLift - ((openLimitLift - closedLimitLift) * lastLiftPercent) / 100;
+    }
+
+    Serial.printf(
+      "Door limits configured: Lift [%d-%d cm]\r\n",
+      matterEndPoint.getInstalledOpenLimitLift(),
+      matterEndPoint.getInstalledClosedLimitLift());
+    Serial.printf("Initial positions: Lift=%d cm (%d%%)\r\n", currentLift, currentLiftPercent);
+  }
+
+  void update() {
+
+  }
+
+  void visualize() {
+    visualizeDoor(matterEndPoint.getLiftPercentage());
+  }
+
+};
+
+Door door;
 
 // -----------------------------------------------------------------------------
 // Matter
 // -----------------------------------------------------------------------------
 
-Preferences matterPref;
-const char *liftPercentPrefKey = "LiftPercent";
-// List of Matter Endpoints for this Node
-// Window Covering Endpoint
-MatterWindowCovering WindowBlinds;
-
 bool fullOpen() {
+  Serial.printf("Full OPEN commanded\r\n");
   // This is where you would trigger your motor to go to full open state
   // For simulation, we update instantly
-  uint16_t openLimit = WindowBlinds.getInstalledOpenLimitLift();
-  currentLift = openLimit;
-  currentLiftPercent = 100;
-  Serial.printf("Opening window covering to full open (position: %d cm)\r\n", currentLift);
+  // uint16_t openLimit = WindowBlinds.getInstalledOpenLimitLift();
+  // currentLift = openLimit;
+  // currentLiftPercent = 100;
+  // Serial.printf("Opening window covering to full open (position: %d cm)\r\n", currentLift);
 
   // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
-  WindowBlinds.setLiftPercentage(currentLiftPercent);
+  // WindowBlinds.setLiftPercentage(currentLiftPercent);
 
   // Set operational status to STALL when movement is complete
-  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+  // WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
 
   // Store state
-  matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+  // matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
 
   return true;
 }
 
 bool fullClose() {
+  Serial.printf("Full CLOSE commanded\r\n");
   // This is where you would trigger your motor to go to full close state
   // For simulation, we update instantly
-  uint16_t closedLimit = WindowBlinds.getInstalledClosedLimitLift();
-  currentLift = closedLimit;
-  currentLiftPercent = 0;
-  Serial.printf("Closing window covering to full close (position: %d cm)\r\n", currentLift);
+  // uint16_t closedLimit = WindowBlinds.getInstalledClosedLimitLift();
+  // currentLift = closedLimit;
+  // currentLiftPercent = 0;
+  // Serial.printf("Closing window covering to full close (position: %d cm)\r\n", currentLift);
 
   // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
-  WindowBlinds.setLiftPercentage(currentLiftPercent);
+  // WindowBlinds.setLiftPercentage(currentLiftPercent);
 
   // Set operational status to STALL when movement is complete
-  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+  // WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
 
   // Store state
-  matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+  // matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
 
   return true;
 }
 
 bool goToLiftPercentage(uint8_t liftPercent) {
-  Serial.printf("Moving from %d%% to %d%% (current position: %d cm)\r\n", currentLiftPercent, liftPercent, currentLift);
+  auto &matterEndPoint = door.matterEndPoint;
+  Serial.printf("Moving from %d%% to %d%% (current position: %d cm)\r\n", door.currentLiftPercent, liftPercent, door.currentLift);
   // update Lift operational state
-  if (liftPercent > currentLiftPercent) {
+  if (liftPercent > door.currentLiftPercent) {
     // Set operational status to OPEN
-    WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_UP_OR_OPEN);
+    matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_UP_OR_OPEN);
   }
-  if (liftPercent < currentLiftPercent) {
+  if (liftPercent < door.currentLiftPercent) {
     // Set operational status to CLOSE
-    WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_DOWN_OR_CLOSE);
+    matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_DOWN_OR_CLOSE);
   }
 
   // This is where you would trigger your motor to go towards liftPercent
   // For simulation, we update instantly
   // Calculate absolute position based on installed limits
-  uint16_t openLimit = WindowBlinds.getInstalledOpenLimitLift();
-  uint16_t closedLimit = WindowBlinds.getInstalledClosedLimitLift();
+  uint16_t openLimit = matterEndPoint.getInstalledOpenLimitLift();
+  uint16_t closedLimit = matterEndPoint.getInstalledClosedLimitLift();
 
   // Linear interpolation: 0% = openLimit, 100% = closedLimit
   if (openLimit < closedLimit) {
-    currentLift = openLimit + ((closedLimit - openLimit) * liftPercent) / 100;
+    door.currentLift = openLimit + ((closedLimit - openLimit) * liftPercent) / 100;
   } else {
-    currentLift = openLimit - ((openLimit - closedLimit) * liftPercent) / 100;
+    door.currentLift = openLimit - ((openLimit - closedLimit) * liftPercent) / 100;
   }
-  currentLiftPercent = liftPercent;
-  Serial.printf("Moved to %d%% (position: %d cm)\r\n", currentLiftPercent, currentLift);
+  door.currentLiftPercent = liftPercent;
+  Serial.printf("Moved to %d%% (position: %d cm)\r\n", door.currentLiftPercent, door.currentLift);
 
   // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
-  WindowBlinds.setLiftPercentage(currentLiftPercent);
+  matterEndPoint.setLiftPercentage(door.currentLiftPercent);
 
   // Set operational status to STALL when movement is complete
-  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+  matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
 
   // Store state
-  matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+  matterPref.putUChar(liftPercentPrefKey, door.currentLiftPercent);
 
   return true;
 }
 
 bool stopMotor() {
+  Serial.println("STOP commanded");
   // Motor can be stopped while moving cover toward current target
-  Serial.println("Stopping window covering motor");
+  // Serial.println("Stopping window covering motor");
 
   // Update CurrentPosition to reflect actual position when stopped
-  WindowBlinds.setLiftPercentage(currentLiftPercent);
+  // WindowBlinds.setLiftPercentage(currentLiftPercent);
 
   // Set operational status to STALL for both lift
-  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+  // WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
 
   return true;
 }
 
 void matterSetup() {
-  // Initialize Matter EndPoint
-  matterPref.begin("MatterPrefs", false);
-  // default lift percentage is 0% (fully closed) if not stored before
-  uint8_t lastLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
-
-  WindowBlinds.begin(lastLiftPercent, 0, MatterWindowCovering::ROLLERSHADE_EXTERIOR);
-
-  // Configure installed limits for lift
-  WindowBlinds.setInstalledOpenLimitLift(MIN_LIFT);
-  WindowBlinds.setInstalledClosedLimitLift(MAX_LIFT);
-
-  // Initialize current positions based on percentages and installed limits
-  uint16_t openLimitLift = WindowBlinds.getInstalledOpenLimitLift();
-  uint16_t closedLimitLift = WindowBlinds.getInstalledClosedLimitLift();
-  currentLiftPercent = lastLiftPercent;
-  if (openLimitLift < closedLimitLift) {
-    currentLift = openLimitLift + ((closedLimitLift - openLimitLift) * lastLiftPercent) / 100;
-  } else {
-    currentLift = openLimitLift - ((openLimitLift - closedLimitLift) * lastLiftPercent) / 100;
-  }
-
-  Serial.printf(
-    "Window Covering limits configured: Lift [%d-%d cm]\r\n",
-    WindowBlinds.getInstalledOpenLimitLift(),
-    WindowBlinds.getInstalledClosedLimitLift());
-  Serial.printf("Initial positions: Lift=%d cm (%d%%)\r\n", currentLift, currentLiftPercent);
-
   // Set callback functions
-  WindowBlinds.onOpen(fullOpen);
-  WindowBlinds.onClose(fullClose);
+  // WindowBlinds.onOpen(fullOpen);
+  // WindowBlinds.onClose(fullClose);
+  auto &WindowBlinds = door.matterEndPoint;
   WindowBlinds.onGoToLiftPercentage(goToLiftPercentage);
   WindowBlinds.onStop(stopMotor);
 
   // Generic callback for Lift or Tilt change
   WindowBlinds.onChange([](uint8_t liftPercent, uint8_t tiltPercent) {
     Serial.printf("Window Covering changed: Lift=%d%%, Tilt=%d%%\r\n", liftPercent, tiltPercent);
-    visualizeWindowBlinds(liftPercent);
+    visualizeDoor(liftPercent);
     return true;
   });
 
@@ -294,9 +308,9 @@ void matterSetup() {
   // This may be a restart of a already commissioned Matter accessory
   if (Matter.isDeviceCommissioned()) {
     Serial.println("Matter Node is commissioned and connected to the network. Ready for use.");
-    Serial.printf("Initial state: Lift=%d%%\r\n", WindowBlinds.getLiftPercentage());
+    // Serial.printf("Initial state: Lift=%d%%\r\n", WindowBlinds.getLiftPercentage());
     // Update visualization based on initial state
-    visualizeWindowBlinds(WindowBlinds.getLiftPercentage());
+    
   }
 }
 
@@ -318,9 +332,9 @@ void matterUpdate() {
         Serial.println("Matter Node not commissioned yet. Waiting for commissioning.");
       }
     }
-    Serial.printf("Initial state: Lift=%d%%\r\n", WindowBlinds.getLiftPercentage());
+    // Serial.printf("Initial state: Lift=%d%%\r\n", WindowBlinds.getLiftPercentage());
     // Update visualization based on initial state
-    visualizeWindowBlinds(WindowBlinds.getLiftPercentage());
+    // visualizeDoor(WindowBlinds.getLiftPercentage());
     Serial.println("Matter Node is commissioned and connected to the network. Ready for use.");
   }
 }
@@ -365,8 +379,8 @@ void setup() {
     // Wifi
     wifiSetup();
 
-    // Doors
-    doorSetup();
+    // Door
+    door.setup();
 
     // Matter
     matterSetup();
