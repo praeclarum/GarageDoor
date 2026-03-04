@@ -27,11 +27,6 @@ const uint8_t ledPin = 2;  // Set your pin here if your board has not defined RG
 
 const uint8_t LIFT_SECONDS = 12;
 
-// Window covering limits
-// Lift limits in centimeters (physical position)
-const uint16_t MAX_LIFT = 200;  // Maximum lift position (fully open)
-const uint16_t MIN_LIFT = 0;    // Minimum lift position (fully closed)
-
 
 // -----------------------------------------------------------------------------
 // Door Button
@@ -99,16 +94,26 @@ public:
 Preferences matterPref;
 const char *liftPercentPrefKey = "LiftPercent";
 
+enum DoorState {
+  DS_Opened = 0,
+  DS_Closed = 1,
+  DS_Moving = 2,
+};
+
 class Door {
 private:
   DoorButton button;
   MatterWindowCovering matterEndPoint;
-  uint16_t currentLift = 0;
-  uint8_t currentLiftPercent = 0;
+  uint8_t currentLiftPercent;
+  uint8_t targetLiftPercent;
+
+  DoorState state;
+  long lastStateTransitionMillis;
 
 private:
   bool goToLiftPercentage(uint8_t liftPercent) {
-    Serial.printf("Moving from %d%% to %d%% (current position: %d cm)\r\n", currentLiftPercent, liftPercent, currentLift);
+    targetLiftPercent = liftPercent;
+    Serial.printf("Moving from %d%% to %d%%\r\n", currentLiftPercent, liftPercent);
     // update Lift operational state
     if (liftPercent > currentLiftPercent) {
       // Set operational status to OPEN
@@ -119,20 +124,8 @@ private:
       matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_DOWN_OR_CLOSE);
     }
 
-    // This is where you would trigger your motor to go towards liftPercent
-    // For simulation, we update instantly
-    // Calculate absolute position based on installed limits
-    uint16_t openLimit = matterEndPoint.getInstalledOpenLimitLift();
-    uint16_t closedLimit = matterEndPoint.getInstalledClosedLimitLift();
-
-    // Linear interpolation: 0% = openLimit, 100% = closedLimit
-    if (openLimit < closedLimit) {
-      currentLift = openLimit + ((closedLimit - openLimit) * liftPercent) / 100;
-    } else {
-      currentLift = openLimit - ((openLimit - closedLimit) * liftPercent) / 100;
-    }
-    currentLiftPercent = liftPercent;
-    Serial.printf("Moved to %d%% (position: %d cm)\r\n", currentLiftPercent, currentLift);
+    currentLiftPercent = targetLiftPercent;
+    Serial.printf("Moved to %d%%\r\n", currentLiftPercent);
 
     // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
     matterEndPoint.setLiftPercentage(currentLiftPercent);
@@ -168,7 +161,12 @@ private:
   }
 
 public:
-  Door(uint8_t buttonPin) : button(buttonPin) {
+  Door(uint8_t buttonPin)
+    : button(buttonPin)
+    , currentLiftPercent(0)
+    , targetLiftPercent(0)
+    , state(DS_Closed)
+    , lastStateTransitionMillis(millis()) {
   }
 
   void setup() {
@@ -178,29 +176,16 @@ public:
     matterPref.begin("MatterPrefs", false);
 
     // default lift percentage is 0% (fully closed) if not stored before
-    uint8_t lastLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+    uint8_t currentLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+    state = currentLiftPercent < 50 ? DS_Opened : DS_Closed;
 
-    matterEndPoint.begin(lastLiftPercent, 0, MatterWindowCovering::ROLLERSHADE_EXTERIOR);
+    matterEndPoint.begin(currentLiftPercent, 0, MatterWindowCovering::ROLLERSHADE_EXTERIOR);
 
-    // Configure installed limits for lift
-    matterEndPoint.setInstalledOpenLimitLift(MIN_LIFT);
-    matterEndPoint.setInstalledClosedLimitLift(MAX_LIFT);
+    // Configure installed limits for lift. These are not used.
+    matterEndPoint.setInstalledOpenLimitLift(0);
+    matterEndPoint.setInstalledClosedLimitLift(100);
 
-    // Initialize current positions based on percentages and installed limits
-    uint16_t openLimitLift = matterEndPoint.getInstalledOpenLimitLift();
-    uint16_t closedLimitLift = matterEndPoint.getInstalledClosedLimitLift();
-    currentLiftPercent = lastLiftPercent;
-    if (openLimitLift < closedLimitLift) {
-      currentLift = openLimitLift + ((closedLimitLift - openLimitLift) * lastLiftPercent) / 100;
-    } else {
-      currentLift = openLimitLift - ((openLimitLift - closedLimitLift) * lastLiftPercent) / 100;
-    }
-
-    Serial.printf(
-      "Door limits configured: Lift [%d-%d cm]\r\n",
-      matterEndPoint.getInstalledOpenLimitLift(),
-      matterEndPoint.getInstalledClosedLimitLift());
-    Serial.printf("Initial positions: Lift=%d cm (%d%%)\r\n", currentLift, currentLiftPercent);
+    Serial.printf("Initial position: Lift=%d%%\r\n", currentLiftPercent);
 
     matterEndPoint.onOpen([]() {
       Serial.printf("OPEN commanded\r\n");
