@@ -131,7 +131,9 @@ void doorSetup() {
 void visualizeWindowBlinds(uint8_t liftPercent) {
 #ifdef RGB_BUILTIN
   // Use RGB LED to visualize lift position (brightness)
-  float brightness = (float)liftPercent / 100.0f;  // 0.0 to 1.0
+  // At LIFT 0% the opening is 100%
+  // At LIFT 100% the opening is 0%
+  float brightness = 1.0f - (float)liftPercent / 100.0f;  // 0.0 to 1.0
   uint8_t red = (uint8_t)(255 * brightness);
   uint8_t blue = red;
   uint8_t green = red;
@@ -154,7 +156,48 @@ const char *liftPercentPrefKey = "LiftPercent";
 // Window Covering Endpoint
 MatterWindowCovering WindowBlinds;
 
+bool fullOpen() {
+  // This is where you would trigger your motor to go to full open state
+  // For simulation, we update instantly
+  uint16_t openLimit = WindowBlinds.getInstalledOpenLimitLift();
+  currentLift = openLimit;
+  currentLiftPercent = 100;
+  Serial.printf("Opening window covering to full open (position: %d cm)\r\n", currentLift);
+
+  // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
+  WindowBlinds.setLiftPercentage(currentLiftPercent);
+
+  // Set operational status to STALL when movement is complete
+  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+
+  // Store state
+  matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+
+  return true;
+}
+
+bool fullClose() {
+  // This is where you would trigger your motor to go to full close state
+  // For simulation, we update instantly
+  uint16_t closedLimit = WindowBlinds.getInstalledClosedLimitLift();
+  currentLift = closedLimit;
+  currentLiftPercent = 0;
+  Serial.printf("Closing window covering to full close (position: %d cm)\r\n", currentLift);
+
+  // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
+  WindowBlinds.setLiftPercentage(currentLiftPercent);
+
+  // Set operational status to STALL when movement is complete
+  WindowBlinds.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+
+  // Store state
+  matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+
+  return true;
+}
+
 bool goToLiftPercentage(uint8_t liftPercent) {
+  Serial.printf("Moving from %d%% to %d%% (current position: %d cm)\r\n", currentLiftPercent, liftPercent, currentLift);
   // update Lift operational state
   if (liftPercent > currentLiftPercent) {
     // Set operational status to OPEN
@@ -178,7 +221,7 @@ bool goToLiftPercentage(uint8_t liftPercent) {
     currentLift = openLimit - ((openLimit - closedLimit) * liftPercent) / 100;
   }
   currentLiftPercent = liftPercent;
-  Serial.printf("Moving lift to %d%% (position: %d cm)\r\n", currentLiftPercent, currentLift);
+  Serial.printf("Moved to %d%% (position: %d cm)\r\n", currentLiftPercent, currentLift);
 
   // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
   WindowBlinds.setLiftPercentage(currentLiftPercent);
@@ -234,8 +277,8 @@ void matterSetup() {
   Serial.printf("Initial positions: Lift=%d cm (%d%%)\r\n", currentLift, currentLiftPercent);
 
   // Set callback functions
-  // WindowBlinds.onOpen(fullOpen);
-  // WindowBlinds.onClose(fullClose);
+  WindowBlinds.onOpen(fullOpen);
+  WindowBlinds.onClose(fullClose);
   WindowBlinds.onGoToLiftPercentage(goToLiftPercentage);
   WindowBlinds.onStop(stopMotor);
 
