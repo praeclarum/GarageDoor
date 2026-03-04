@@ -23,7 +23,7 @@ const uint8_t ledPin = 2;  // Set your pin here if your board has not defined RG
 #warning "Do not forget to set the RGB LED pin"
 #endif
 
-#define PIN_DOOR_BUTTON     1
+#define PIN_DOOR_BUTTON     13
 
 const uint8_t DOOR_MOVE_SECONDS = 12;
 
@@ -42,7 +42,7 @@ private:
     uint8_t pin;
     DoorButtonState state;
     bool needsPress;
-    long lastStateTransitionMillis;
+    unsigned long lastStateTransitionMillis;
 
 public:
     DoorButton(uint8_t pin)
@@ -63,7 +63,7 @@ public:
     }
 
     void update() {
-        const long now = millis();
+        const auto now = millis();
         if ((now - lastStateTransitionMillis) < 250) {
             return;
         }
@@ -110,15 +110,15 @@ private:
   uint8_t targetLiftPercent;
 
   DoorState state;
-  long lastStateTransitionMillis;
+  unsigned long lastStateTransitionMillis;
 
-  long lastMatterUpdateMillis;
-  long lastLEDUpdateMillis;
-  long lastSerialUpdateMillis;
+  unsigned long lastMatterUpdateMillis;
+  unsigned long lastLEDUpdateMillis;
+  unsigned long lastSerialUpdateMillis;
 
 private:
   bool goToLiftPercentage(uint8_t liftPercent) {
-    targetLiftPercent = liftPercent;
+    targetLiftPercent = liftPercent < 50 ? 0 : 100;
 
     Serial.printf("[DOOR] Moving from %d%% to %d%%\r\n", currentLiftPercent, targetLiftPercent);
     button.press();
