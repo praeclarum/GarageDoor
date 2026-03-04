@@ -25,7 +25,7 @@ const uint8_t ledPin = 2;  // Set your pin here if your board has not defined RG
 
 #define PIN_DOOR_BUTTON     1
 
-const uint8_t LIFT_SECONDS = 12;
+const uint8_t DOOR_MOVE_SECONDS = 12;
 
 
 // -----------------------------------------------------------------------------
@@ -52,14 +52,14 @@ public:
         , lastStateTransitionMillis(millis()) {
     }
 
-    void setNeedsPress() {
+    void press() {
         needsPress = true;
     }
 
     void setup() {
         pinMode(pin, OUTPUT);
         digitalWrite(pin, LOW);
-        Serial.printf("[DOOR] Button GPIO #%d\n", pin);
+        Serial.printf("[DOOR_BUTTON] Setup GPIO #%d\r\n", pin);
     }
 
     void update() {
@@ -69,6 +69,7 @@ public:
         }
         switch (state) {
         case DBS_Pressing:
+            Serial.printf("[DOOR_BUTTON] Depressed after %d ms\r\n", now - lastStateTransitionMillis);
             digitalWrite(pin, LOW);
             state = DBS_Released;
             lastStateTransitionMillis = now;
@@ -76,9 +77,10 @@ public:
         default:
         case DBS_Released:
             if (needsPress) {
+                Serial.printf("[DOOR_BUTTON] Pressing...\r\n");
                 digitalWrite(pin, HIGH);
-                state = DBS_Pressing;
                 needsPress = false;
+                state = DBS_Pressing;
                 lastStateTransitionMillis = now;
             }
             break;
@@ -110,36 +112,60 @@ private:
   DoorState state;
   long lastStateTransitionMillis;
 
+  long lastMatterUpdateMillis;
+  long lastLEDUpdateMillis;
+  long lastSerialUpdateMillis;
+
 private:
   bool goToLiftPercentage(uint8_t liftPercent) {
     targetLiftPercent = liftPercent;
-    Serial.printf("Moving from %d%% to %d%%\r\n", currentLiftPercent, liftPercent);
-    // update Lift operational state
-    if (liftPercent > currentLiftPercent) {
-      // Set operational status to OPEN
-      matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_UP_OR_OPEN);
-    }
-    if (liftPercent < currentLiftPercent) {
-      // Set operational status to CLOSE
-      matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_DOWN_OR_CLOSE);
-    }
 
-    currentLiftPercent = targetLiftPercent;
-    Serial.printf("Moved to %d%%\r\n", currentLiftPercent);
-
-    // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
-    matterEndPoint.setLiftPercentage(currentLiftPercent);
-
-    // Set operational status to STALL when movement is complete
-    matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
-
-    // Store state
-    matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+    Serial.printf("[DOOR] Moving from %d%% to %d%%\r\n", currentLiftPercent, targetLiftPercent);
+    button.press();
+    state = DS_Moving;
+    lastStateTransitionMillis = millis();
 
     return true;
   }
 
-  void visualizeDoor(uint8_t liftPercent) {
+  void setCurrentLiftPercent(uint8_t newLiftPercent, bool forceUpdateAndDisplay = false) {
+    currentLiftPercent = newLiftPercent;
+    const auto now = millis();
+
+    if (forceUpdateAndDisplay || (now - lastMatterUpdateMillis) >= 1000) {
+      lastMatterUpdateMillis = now;
+
+      // Update CurrentPosition to reflect actual position (setLiftPercentage now only updates CurrentPosition)
+      matterEndPoint.setLiftPercentage(currentLiftPercent);
+
+      // Set operational status
+      if (targetLiftPercent > currentLiftPercent) {
+        matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_UP_OR_OPEN);
+      }
+      else if (targetLiftPercent < currentLiftPercent) {
+        matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::MOVING_DOWN_OR_CLOSE);
+      }
+      else {
+        matterEndPoint.setOperationalState(MatterWindowCovering::LIFT, MatterWindowCovering::STALL);
+      }
+
+      // Store state
+      matterPref.putUChar(liftPercentPrefKey, currentLiftPercent);
+    }
+
+    if (forceUpdateAndDisplay || (now - lastLEDUpdateMillis) >= 100) {
+      lastLEDUpdateMillis = now;
+      visualize();
+    }
+    
+    if (forceUpdateAndDisplay || (now - lastSerialUpdateMillis) >= 1000) {
+      lastSerialUpdateMillis = now;
+      Serial.printf("[DOOR] Current: %d%%\r\n", currentLiftPercent);
+    }
+  }
+
+  void visualize() {
+    const auto liftPercent = currentLiftPercent;
 #ifdef RGB_BUILTIN
     // Use RGB LED to visualize lift position (brightness)
     // At LIFT 0% the opening is 100%
@@ -156,17 +182,17 @@ private:
 #endif
   }
 
-  void visualize() {
-    visualizeDoor(matterEndPoint.getLiftPercentage());
-  }
-
 public:
   Door(uint8_t buttonPin)
     : button(buttonPin)
     , currentLiftPercent(0)
     , targetLiftPercent(0)
     , state(DS_Closed)
-    , lastStateTransitionMillis(millis()) {
+    , lastStateTransitionMillis(0)
+    , lastMatterUpdateMillis(0)
+    , lastLEDUpdateMillis(0)
+    , lastSerialUpdateMillis(0)
+    {
   }
 
   void setup() {
@@ -176,8 +202,10 @@ public:
     matterPref.begin("MatterPrefs", false);
 
     // default lift percentage is 0% (fully closed) if not stored before
-    uint8_t currentLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+    uint8_t oldLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+    targetLiftPercent = oldLiftPercent;
     state = currentLiftPercent < 50 ? DS_Opened : DS_Closed;
+    lastStateTransitionMillis = millis();
 
     matterEndPoint.begin(currentLiftPercent, 0, MatterWindowCovering::ROLLERSHADE_EXTERIOR);
 
@@ -185,32 +213,49 @@ public:
     matterEndPoint.setInstalledOpenLimitLift(0);
     matterEndPoint.setInstalledClosedLimitLift(100);
 
-    Serial.printf("Initial position: Lift=%d%%\r\n", currentLiftPercent);
+    Serial.printf("[DOOR] Initial position: Lift=%d%%\r\n", currentLiftPercent);
 
     matterEndPoint.onOpen([]() {
-      Serial.printf("OPEN commanded\r\n");
+      Serial.printf("[DOOR] OPEN commanded\r\n");
       return true;
     });
     matterEndPoint.onClose([]() {
-      Serial.printf("CLOSE commanded\r\n");
+      Serial.printf("[DOOR] CLOSE commanded\r\n");
       return true;
     });
     matterEndPoint.onGoToLiftPercentage([this](uint8_t liftPercent) {
       return this->goToLiftPercentage(liftPercent);
     });
     matterEndPoint.onStop([]() {
-      Serial.printf("STOP commanded\r\n");
-      return true;
-    });
-    matterEndPoint.onChange([this](uint8_t liftPercent, uint8_t tiltPercent) {
-      Serial.printf("Door changed: Lift=%d%%, Tilt=%d%%\r\n", liftPercent, tiltPercent);
-      this->visualizeDoor(liftPercent);
+      Serial.printf("[DOOR] STOP commanded\r\n");
       return true;
     });
   }
 
   void update() {
     button.update();
+
+    const auto now = millis();
+    
+    if (state == DS_Moving) {
+      const auto durationMillis = now - lastStateTransitionMillis;
+      const float fraction = (float)durationMillis / ((float)DOOR_MOVE_SECONDS * 1000.0f);
+      if (fraction >= 1.0f) {
+        state = targetLiftPercent < 50 ? DS_Opened : DS_Closed;
+        lastStateTransitionMillis = now;
+        setCurrentLiftPercent(targetLiftPercent, true);
+      }
+      else {
+        uint8_t newPercent = 0;
+        if (targetLiftPercent < 50) {
+          newPercent = (uint8_t)((1.0f - fraction) * 100.0f + 0.5f);
+        }
+        else {
+          newPercent = (uint8_t)(fraction * 100.0f + 0.5f);
+        }
+        setCurrentLiftPercent(newPercent);
+      }
+    }
   }
 };
 
