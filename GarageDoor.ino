@@ -155,23 +155,25 @@ private:
 
     if (forceUpdateAndDisplay || (now - lastLEDUpdateMillis) >= 100) {
       lastLEDUpdateMillis = now;
-      visualize();
+      updateLED();
     }
     
     if (forceUpdateAndDisplay || (now - lastSerialUpdateMillis) >= 1000) {
       lastSerialUpdateMillis = now;
-      Serial.printf("[DOOR] Current: %d%%\r\n", currentLiftPercent);
+      Serial.printf("[DOOR] Current: %d%% (target: %d%%)\r\n", currentLiftPercent, targetLiftPercent);
     }
   }
 
-  void visualize() {
-    const auto liftPercent = currentLiftPercent;
+  void updateLED() {
 #ifdef RGB_BUILTIN
     // Use RGB LED to visualize lift position (brightness)
     // At LIFT 0% the opening is 100%
     // At LIFT 100% the opening is 0%
-    float brightness = 1.0f - (float)liftPercent / 100.0f;  // 0.0 to 1.0
-    uint8_t red = (uint8_t)(255 * brightness);
+    float brightnessF = 1.0f - (float)currentLiftPercent / 100.0f;  // 0.0 to 1.0
+    int gray = (int)(255.0f * brightnessF + 0.5f);
+    if (gray < 0) gray = 0;
+    else if (gray > 255) gray = 255;
+    uint8_t red = (uint8_t)gray;
     uint8_t blue = red;
     uint8_t green = red;
     rgbLedWrite(ledPin, red, green, blue);
@@ -202,8 +204,9 @@ public:
     matterPref.begin("MatterPrefs", false);
 
     // default lift percentage is 0% (fully closed) if not stored before
-    uint8_t oldLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
-    targetLiftPercent = oldLiftPercent;
+    currentLiftPercent = matterPref.getUChar(liftPercentPrefKey, 0);
+    if (currentLiftPercent > 100) currentLiftPercent = 100;
+    targetLiftPercent = currentLiftPercent;
     state = currentLiftPercent < 50 ? DS_Opened : DS_Closed;
     lastStateTransitionMillis = millis();
 
@@ -230,6 +233,8 @@ public:
       Serial.printf("[DOOR] STOP commanded\r\n");
       return true;
     });
+
+    updateLED();
   }
 
   void update() {
