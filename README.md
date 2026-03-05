@@ -70,6 +70,7 @@ Mount the ESP32 and relay near your garage door opener on the ceiling. Power the
 3. **Select your board** in Arduino IDE:
    - *Tools → Board → esp32 → ESP32S3 Dev Module* (or your specific variant)
    - *Tools → USB CDC On Boot → Enabled* (for Serial Monitor output on Supermini)
+   - *Tools → Partition Scheme → Huge APP (3MB No OTA/1MB SPIFFS)* (to ensure enough space for Matter stack)
 
 4. **Upload** the sketch to your ESP32.
 
