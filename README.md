@@ -19,7 +19,7 @@ The door's position is estimated by timing (default: 12 seconds for a full open/
 | Part | Description | Link |
 |------|-------------|------|
 | **ESP32-S3 Supermini** | Microcontroller board (most ESP32 variants will work) | [Amazon](https://a.co/d/0guFfRhl) |
-| **5V Relay Module** | Triggers from 3.3V logic, switches the garage button circuit | [Amazon](https://www.amazon.com/dp/B07874KSLY) |
+| **5V Relay Module** | Triggers from 3.3V logic, switches the garage button circuit | [Amazon](https://a.co/d/00CKDEd9) |
 | **USB Power Adapter** | Powers the ESP32 near the garage door opener | Any USB-C adapter |
 | **Wire** | Hookup wire for connecting relay to the wall-button terminals | 22–18 AWG |
 
